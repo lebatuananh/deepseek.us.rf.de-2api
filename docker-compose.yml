@@ -1,0 +1,28 @@
+# Chạy toàn bộ: docker compose up -d --build
+# Trước đó: cp .env.example .env và đặt API_KEYS
+services:
+  cf_solver:
+    build: ./tools/cf_solver
+    restart: unless-stopped
+    shm_size: "2gb" # Firefox cần /dev/shm lớn, nếu không dễ crash
+    # Không publish cổng: chỉ gateway truy cập được qua mạng nội bộ compose
+
+  gateway:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - cf_solver
+    ports:
+      - "${GATEWAY_PORT:-47833}:47833"
+    environment:
+      CF_SOLVER_URL: http://cf_solver:8001
+      API_KEYS: ${API_KEYS:?Hãy đặt API_KEYS trong file .env}
+    volumes:
+      # ledger_path chỉ cấu hình được qua file (không có biến môi trường),
+      # nên mount file này để trỏ sổ cái SQLite vào /data
+      - ./docker/config.json:/app/config.json:ro
+      # Bind mount: sổ cái SQLite (usage.db) nằm ngay trên máy host, mặc định ./data
+      # Lưu ý: SQLite chế độ WAL trên ổ Windows/macOS được bind mount có thể gặp lỗi lock;
+      # nếu thấy log cảnh báo "hạ xuống bộ nhớ" thì đổi lại sang named volume.
+      - ${DATA_DIR:-./data}:/data
+    stop_grace_period: 30s # gateway tắt êm (chờ request dở); tránh bị SIGKILL giữa lúc ghi WAL

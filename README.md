@@ -1,33 +1,34 @@
 # deepseek-es-2api
 
-把 [deepseek.es](https://deepseek.es)（WordPress + AIPKit 聊天）转换为 **OpenAI 兼容**（`/v1/chat/completions`）
-与 **Anthropic 兼容**（`/v1/messages`）的 API 网关，**对接外部 cf_solver 完成 Cloudflare Turnstile 求解**。
+API gateway chuyển [deepseek.es](https://deepseek.es) (chat WordPress + AIPKit) thành API **tương thích OpenAI** (`/v1/chat/completions`)
+và **tương thích Anthropic** (`/v1/messages`), **kết nối với cf_solver bên ngoài để giải Cloudflare Turnstile**.
 
-> 上游为非标准 SSE 协议，本网关在 Rust 侧完成认证（Turnstile）、会话管理与协议翻译。
-> **已通过真实 E2E 验证**：Turnstile 求解 → 安全 Cookie → SSE 流 → OpenAI/Anthropic 兼容输出。
+> Upstream dùng giao thức SSE không chuẩn. Gateway này xử lý xác thực (Turnstile), quản lý phiên và dịch giao thức ở phía Rust.
+> **Đã được kiểm chứng E2E thực tế**: giải Turnstile → cookie bảo mật → luồng SSE → đầu ra tương thích OpenAI/Anthropic.
 
 ---
 
-## 架构
+## Kiến trúc
 
 ```
 ┌─────────────┐   OpenAI/Anthropic    ┌──────────────────────────┐
-│  客户端      │ ───────────────────▶ │  deepseek-es-2api (Rust)  │
-│ (Cursor/    │                       │  · 协议翻译 (SSE↔OpenAI)  │
-│  Claude Code)│ ◀─────────────────── │  · 会话映射 (conv_uuid)   │
-└─────────────┘     SSE / JSON        │  · Cookie 池 + 自愈       │
+│  Client     │ ───────────────────▶ │  deepseek-es-2api (Rust)  │
+│ (Cursor/    │                       │  · Dịch giao thức         │
+│  Claude Code)│ ◀─────────────────── │    (SSE↔OpenAI)           │
+└─────────────┘     SSE / JSON        │  · Ánh xạ phiên (conv_uuid)│
+                                      │  · Cookie pool + tự phục hồi│
                                       └───────────┬──────────────┘
                                                   │
                           ┌───────────────────────┼───────────────────────┐
                           ▼                       ▼                       ▼
                   ┌───────────────┐      ┌────────────────┐     ┌─────────────────┐
                   │ deepseek.es   │      │ cf_solver      │     │ Turnstile       │
-                  │ admin-ajax    │      │ (camoufox)     │     │ 求解            │
+                  │ admin-ajax    │      │ (camoufox)     │     │ (giải)          │
                   │ + SSE         │      │ 127.0.0.1:8001 │     │                 │
                   └───────────────┘      └────────────────┘     └─────────────────┘
 ```
 
-**认证流程**（首次/失效时自动触发）：
+**Luồng xác thực** (tự động kích hoạt lần đầu hoặc khi hết hiệu lực):
 ```
 solve Turnstile (cf_solver) → POST deepseek_ts_verify → dsts_ok cookie
   → POST aipkit_get_frontend_chat_nonce → nonce
@@ -37,39 +38,39 @@ solve Turnstile (cf_solver) → POST deepseek_ts_verify → dsts_ok cookie
 
 ---
 
-## 快速开始
+## Bắt đầu nhanh
 
-### 1. 启动 cf_solver（Cloudflare Turnstile 求解）
+### 1. Khởi động cf_solver (giải Cloudflare Turnstile)
 
-需要 Python 3.11 + camoufox（见 `tools/cf_solver/requirements.txt`）：
+Cần Python 3.11 + camoufox (xem `tools/cf_solver/requirements.txt`):
 
 ```bash
 cd tools/cf_solver
 pip install -r requirements.txt
-python -m camoufox fetch          # 首次下载浏览器
-python boterdrop_wrapper.py       # 监听 0.0.0.0:8001，等待 "Pool siap"
+python -m camoufox fetch          # tải trình duyệt lần đầu
+python boterdrop_wrapper.py       # lắng nghe 0.0.0.0:8001, đợi "Pool siap"
 ```
 
-### 2. 编译并启动网关
+### 2. Biên dịch và khởi động gateway
 
 ```bash
 cargo build --release
-cp config.example.json config.json   # 按需修改
+cp config.example.json config.json   # chỉnh sửa tùy nhu cầu
 ./target/release/deepseek-es-2api --config config.json
 ```
 
-默认监听 `http://127.0.0.1:47833`。
+Mặc định lắng nghe tại `http://127.0.0.1:47833`.
 
-### 3. 接入客户端
+### 3. Kết nối client
 
 **OpenAI SDK / Cursor / Continue**
 ```
 Base URL: http://127.0.0.1:47833/v1
-API Key:  sk-local（未配置 api_keys 时随意填）
+API Key:  sk-local (điền tùy ý khi chưa cấu hình api_keys)
 Model:    deepseek-es
 ```
 
-**Claude Code（Anthropic 协议）**
+**Claude Code (giao thức Anthropic)**
 ```bash
 export ANTHROPIC_BASE_URL=http://127.0.0.1:47833
 export ANTHROPIC_API_KEY=sk-local
@@ -78,162 +79,162 @@ claude
 
 ---
 
-## API 端点
+## Endpoint API
 
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/v1/chat/completions` | POST | OpenAI 聊天（流式 / 非流式） |
-| `/v1/messages` | POST | Anthropic 聊天（流式 / 非流式），供 Claude Code |
-| `/v1/messages/count_tokens` | POST | token 预估 |
-| `/v1/models` | GET | 模型列表 |
-| `/healthz` | GET | 健康检查 |
-| `/admin` | GET | 控制台 Web UI（需 `admin_enabled` + `admin_token`） |
-| `/admin/api/status` | GET | 控制台数据 JSON |
-| `/v1/responses/{id}` | GET | **断线重放**：回放某次流式响应未收到的事件 |
-| `/v1/balance` | GET | 上游配额/余额（**网关身份**，非用户余额） |
-| `/v1/conversations` | GET / DELETE | 列出 / 删除上游会话（`?id=`；`x-session-id` 头区分会话） |
+| Endpoint | Method | Mô tả |
+|----------|--------|-------|
+| `/v1/chat/completions` | POST | Chat OpenAI (streaming / không streaming) |
+| `/v1/messages` | POST | Chat Anthropic (streaming / không streaming), dành cho Claude Code |
+| `/v1/messages/count_tokens` | POST | Ước tính token |
+| `/v1/models` | GET | Danh sách mô hình |
+| `/healthz` | GET | Kiểm tra sức khỏe |
+| `/admin` | GET | Web UI bảng điều khiển (cần `admin_enabled` + `admin_token`) |
+| `/admin/api/status` | GET | Dữ liệu bảng điều khiển (JSON) |
+| `/v1/responses/{id}` | GET | **Phát lại khi mất kết nối**: phát lại các sự kiện chưa nhận được của một phản hồi streaming |
+| `/v1/balance` | GET | Hạn mức/số dư upstream (của **danh tính gateway**, không phải số dư người dùng) |
+| `/v1/conversations` | GET / DELETE | Liệt kê / xóa phiên upstream (`?id=`; header `x-session-id` để phân biệt phiên) |
 
-### 控制台
+### Bảng điều khiển
 
-`admin_enabled=true` 且设置 `admin_token` 后访问 `http://127.0.0.1:47833/admin?token=<token>`
-（或 `X-Admin-Token` 头）。展示：模型列表、实时用量统计、solver 健康、最近请求、配置概览。
-自包含单页（无外部 CDN），仅本机建议开启。
+Sau khi đặt `admin_enabled=true` và `admin_token`, truy cập `http://127.0.0.1:47833/admin?token=<token>`
+(hoặc dùng header `X-Admin-Token`). Hiển thị: danh sách mô hình, thống kê sử dụng thời gian thực, tình trạng solver, yêu cầu gần đây, tổng quan cấu hình.
+Là trang đơn tự chứa (không dùng CDN bên ngoài), khuyến nghị chỉ bật trên máy cục bộ.
 
-### 增强特性
+### Tính năng nâng cao
 
-| 特性 | 配置 | 说明 |
-|------|------|------|
-| **请求级响应缓存** | `cache_ttl_secs` | 相同 prompt（**无会话语义**）短时复用；OpenAI 与 Anthropic **两端均生效**；`temperature > 0` 不缓存 |
-| **用量账本** | `ledger_path` | SQLite 持久化（`usage.db`）；空 = 关闭 |
-| **多 solver 负载均衡** | `solver_urls` | 轮询 + 健康探测 + 故障转移；可混用浏览器与第三方 API 后端 |
-| **第三方 API solver** | `tools/api_solver` | 纯 HTTP 适配器（capsolver/2captcha），camoufox 宕机时接管 |
-| **预置 cookie** | `initial_cookies` | 用自己的浏览器过一次 CF，`scripts/collect-cookie.mjs` 采集，**零 solver 依赖** |
-| **语言注入** | `system_prompt_suffix` | 追加 system 指令（如"用用户语言回答"） |
-| **多轮对话** | — | 客户端发送的完整消息历史会被渲染进 prompt（见下） |
-| **工具调用** | — | 协议级 `tools`/`tool_calls`（OpenAI）与 `tools`/`tool_use`（Anthropic），见下 |
-| **伪工具调用** | `pseudo_tools_enabled` | 网关**本地执行**工具（与上面「工具调用」不同，见下） |
-| **流式用量** | — | `stream_options.include_usage` → 在 `[DONE]` 前返回 usage 帧 |
-| **断线重放** | — | SSE 事件带 `id:`；见下方限制说明 |
+| Tính năng | Cấu hình | Mô tả |
+|-----------|----------|-------|
+| **Cache phản hồi theo yêu cầu** | `cache_ttl_secs` | Dùng lại trong thời gian ngắn cho cùng một prompt (**không có ngữ nghĩa phiên**); có hiệu lực ở **cả OpenAI và Anthropic**; `temperature > 0` thì không cache |
+| **Sổ cái sử dụng** | `ledger_path` | Lưu bền bằng SQLite (`usage.db`); để trống = tắt |
+| **Cân bằng tải nhiều solver** | `solver_urls` | Round-robin + dò sức khỏe + chuyển dự phòng; có thể trộn trình duyệt và backend API bên thứ ba |
+| **Solver API bên thứ ba** | `tools/api_solver` | Adapter HTTP thuần (capsolver/2captcha), tiếp quản khi camoufox ngừng hoạt động |
+| **Cookie cài sẵn** | `initial_cookies` | Dùng trình duyệt của bạn vượt CF một lần, thu thập bằng `scripts/collect-cookie.mjs`, **không phụ thuộc solver** |
+| **Chèn ngôn ngữ** | `system_prompt_suffix` | Thêm chỉ dẫn system (ví dụ "trả lời bằng ngôn ngữ của người dùng") |
+| **Hội thoại nhiều lượt** | — | Toàn bộ lịch sử tin nhắn do client gửi được render vào prompt (xem bên dưới) |
+| **Gọi công cụ** | — | `tools`/`tool_calls` ở cấp giao thức (OpenAI) và `tools`/`tool_use` (Anthropic), xem bên dưới |
+| **Gọi công cụ giả** | `pseudo_tools_enabled` | Gateway **thực thi công cụ cục bộ** (khác với "Gọi công cụ" ở trên, xem bên dưới) |
+| **Usage khi streaming** | — | `stream_options.include_usage` → trả về frame usage trước `[DONE]` |
+| **Phát lại khi mất kết nối** | — | Sự kiện SSE có `id:`; xem phần giới hạn bên dưới |
 
-> **工具调用（协议级，v0.7.0）**：客户端在请求里传 `tools` 即启用。上游虽**不支持原生
-> function calling**，网关通过「注入工具说明 → 解析模型输出的 ` ```tool ` 块 → 产出标准协议结构」
-> 实现：OpenAI 返回 `choices[].message.tool_calls` + `finish_reason:"tool_calls"`；
-> Anthropic 返回 `content[].type=="tool_use"` + `stop_reason:"tool_use"`。
-> 客户端回传结果（OpenAI `role:"tool"` / Anthropic `tool_result`）会被转成 prompt 供模型续答。
-> 流式支持：`delta.tool_calls`（OpenAI）/ `input_json_delta`（Anthropic），工具块内容不会泄漏到文本流。
+> **Gọi công cụ (cấp giao thức, v0.7.0)**: bật khi client truyền `tools` trong yêu cầu. Dù upstream **không hỗ trợ
+> function calling gốc**, gateway thực hiện qua "chèn mô tả công cụ → phân tích khối ` ```tool ` trong đầu ra của mô hình → tạo cấu trúc giao thức chuẩn":
+> OpenAI trả về `choices[].message.tool_calls` + `finish_reason:"tool_calls"`;
+> Anthropic trả về `content[].type=="tool_use"` + `stop_reason:"tool_use"`.
+> Kết quả client gửi lại (OpenAI `role:"tool"` / Anthropic `tool_result`) sẽ được chuyển thành prompt để mô hình trả lời tiếp.
+> Hỗ trợ streaming: `delta.tool_calls` (OpenAI) / `input_json_delta` (Anthropic); nội dung khối công cụ không bị rò vào luồng văn bản.
 
-> **伪工具调用（网关注入，与上不同）**：`pseudo_tools_enabled=true` 时，网关注入内置工具说明
-> （`get_time`/`echo`）并**在网关本地执行**，结果以文本回填——用于无客户端工具执行能力的场景。
-> 二者互斥：请求含 `tools` 时走协议级工具，否则按 `pseudo_tools_enabled` 决定。
+> **Gọi công cụ giả (do gateway chèn, khác với trên)**: khi `pseudo_tools_enabled=true`, gateway chèn mô tả công cụ tích hợp
+> (`get_time`/`echo`) và **thực thi cục bộ trên gateway**, kết quả được điền lại dưới dạng văn bản, dùng cho trường hợp client không có khả năng thực thi công cụ.
+> Hai chế độ loại trừ nhau: nếu yêu cầu có `tools` thì dùng công cụ cấp giao thức, ngược lại dựa vào `pseudo_tools_enabled`.
 
-> **多轮对话语义**：上游虽按 `conversation_uuid` 承接历史，但标准 OpenAI/Anthropic 客户端
-> **每轮发送完整历史**，且多数 SDK 默认不设 `user` 字段——此时网关无法稳定映射会话，
-> 只取末条会导致**历史丢失**。故本网关**多轮时把完整历史按角色渲染进 prompt**
-> （`user: ... / assistant: ...`），使网关自身无状态、每轮独立可复现；
-> 单轮请求保持原样（不引入角色前缀）。
+> **Ngữ nghĩa hội thoại nhiều lượt**: dù upstream tiếp nối lịch sử theo `conversation_uuid`, các client OpenAI/Anthropic chuẩn
+> **gửi toàn bộ lịch sử mỗi lượt**, và đa số SDK mặc định không đặt trường `user`: khi đó gateway không thể ánh xạ phiên ổn định,
+> nếu chỉ lấy tin nhắn cuối sẽ **mất lịch sử**. Vì vậy gateway **render toàn bộ lịch sử vào prompt theo vai trò khi nhiều lượt**
+> (`user: ... / assistant: ...`), giúp gateway không giữ trạng thái và mỗi lượt có thể tái hiện độc lập;
+> yêu cầu một lượt giữ nguyên (không thêm tiền tố vai trò).
 
-> **UTF-8 完整性**：上游 SSE 可能把多字节字符（CJK/emoji）切在网络 chunk 边界。
-> 网关内部以**字节级缓冲**解析，只在完整事件边界解码，保证多字节字符不被损坏为 `�`。
+> **Toàn vẹn UTF-8**: SSE của upstream có thể cắt ký tự đa byte (CJK/emoji) ngay ở ranh giới chunk mạng.
+> Gateway phân tích bằng **bộ đệm mức byte** và chỉ giải mã tại ranh giới sự kiện hoàn chỉnh, đảm bảo ký tự đa byte không bị hỏng thành `�`.
 
-> **断线重连限制（如实披露）**：上游 SSE **不发 `id:` 行**且 `cache_key` 一次性，
-> 故**无法**实现真正的 `Last-Event-ID` 上游续传。网关侧实现的是**缓冲重放**：
-> 流式响应带 `x-response-id` 头，客户端断线后可 `GET /v1/responses/<id>` 并附
-> `Last-Event-ID`（或 `?after=N`）**在同进程内重新获取**未收到的事件；
-> 进程重启或缓冲过期（默认 TTL 300s）返回 409，需客户端重新发起。
-
----
-
-## 配置（`config.json`）
-
-| 字段 | 默认 | 说明 |
-|------|------|------|
-| `listen_addr` | `127.0.0.1:47833` | 监听地址 |
-| `upstream_base_url` | `https://deepseek.es` | 上游 |
-| `bot_id` | `27623` | AIPKit 机器人 ID |
-| `sitekey` | `0x4AAAAAADlLZ3ljqZP6cQwq` | Turnstile sitekey |
-| `cf_solver_url` | `http://127.0.0.1:8001` | 求解器地址 |
-| `api_keys` | `[]` | 下游 Key；空 = 仅本机放行。支持 `"sk-x"` 或 `{"key":"sk-x","expires_at":<unix秒>}`（过期自动拒绝） |
-| `proxy` | `null` | 上游出口代理（如 `http://127.0.0.1:10808`） |
-| `initial_cookies` | `""` | 预置 cookie（`"dsts_ok=1; dsts=<hash>"`）—— **完全绕过 solver**，用 `scripts/collect-cookie.mjs` 采集 |
-| `user_agent` | `Chrome/150` | 浏览器 UA（**必须与 cf_solver 一致**，否则 cookie 绑定失败） |
-| `default_model` | `deepseek-es` | 默认模型 id（可自定义，`resolve_model` 据此回退） |
-| `solver_timeout_secs` | `120` | Turnstile 求解超时（秒） |
-| `http_timeout_secs` | `120` | 上游请求空闲读超时（秒；SSE 无总超时，按两次读之间计） |
-| `cookie_ttl_secs` | `1800` | 安全 cookie 缓存 TTL（剩余 20% 时后台预取续期） |
-| `connect_timeout_secs` | `20` | 上游连接建立超时（SSE 流无总超时，仅连接 + 空闲读超时） |
-| `cors_allow_origins` | `[]` | CORS；空 = 关闭 |
-| `solver_retries` | `2` | 求解失败重试次数（指数退避） |
-| `breaker_fail_threshold` | `5` | 认证熔断：连续失败阈值 |
-| `breaker_cooldown_secs` | `30` | 认证熔断：冷却秒数 |
-| `max_concurrency` | `0` | **全局**最大并发（0 = 不限）。注：仅在 handler 返回响应头前生效，不约束已建立的 SSE 流时长 |
-| `rate_limit_per_sec` | `0` | 端点每秒限流（0 = 不限，固定窗口，全局共享；位于鉴权之前，未鉴权请求同样计数） |
-| `admin_enabled` | `false` | 启用控制台 |
-| `admin_token` | `""` | 控制台令牌（启用时必填）；支持 `sha256:<hex>` 哈希形式（泄露 ≠ 令牌泄露） |
-| `admin_rate_limit_per_sec` | `10` | 控制台独立限流（防 token 暴力破解） |
-| `cache_ttl_secs` | `300` | 响应缓存 TTL（0 = 关闭） |
-| `cache_max_entries` | `1000` | 响应缓存最大条目 |
-| `cache_min_chars` | `0` | 低于该长度的结果不缓存 |
-| `ledger_path` | `usage.db` | SQLite 账本路径（空 = 关闭） |
-| `ledger_retention_days` | `30` | 账本保留天数（0 = 不清理）；超期记录每 6h 自动删除 |
-| `solver_urls` | `[]` | 多 solver 地址（轮询 + 故障转移）。可混用 camoufox（tools/cf_solver）与第三方 API 适配器（tools/api_solver） |
-| `system_prompt_suffix` | `""` | 追加的 system 指令（语言/风格） |
-| `pseudo_tools_enabled` | `false` | 启用伪工具（注入工具说明；模型输出 ` ```tool ` 块 → 本地执行） |
-| `max_response_bytes` | `2097152` | 非流式聚合上限（防超大响应） |
-| `max_request_bytes` | `8388608` | 请求体上限（默认 8MB；长上下文客户端可调大） |
-
-环境变量可覆盖：`LISTEN_ADDR` `UPSTREAM_BASE_URL` `BOT_ID` `SITEKEY` `CF_SOLVER_URL` `API_KEYS` `PROXY` `DEFAULT_MODEL` `CORS_ALLOW_ORIGINS` `HTTP_TIMEOUT_SECS` `CONNECT_TIMEOUT_SECS` `USER_AGENT`
-
-> **安全**：监听地址为**非回环**（如 `0.0.0.0`）且 `api_keys` 为空时，网关**拒绝启动**（fail-fast）。确需无鉴权暴露公网须显式设置 `ALLOW_INSECURE_PUBLIC=1`（危险）。
+> **Giới hạn khi mất kết nối (công khai trung thực)**: SSE của upstream **không gửi dòng `id:`** và `cache_key` chỉ dùng một lần,
+> nên **không thể** thực hiện việc tiếp tục luồng upstream bằng `Last-Event-ID` đúng nghĩa. Gateway triển khai **phát lại từ bộ đệm**:
+> phản hồi streaming có header `x-response-id`; sau khi client mất kết nối có thể `GET /v1/responses/<id>` kèm
+> `Last-Event-ID` (hoặc `?after=N`) để **lấy lại các sự kiện chưa nhận trong cùng tiến trình**;
+> nếu tiến trình khởi động lại hoặc bộ đệm hết hạn (TTL mặc định 300s) sẽ trả 409, client cần gửi lại yêu cầu.
 
 ---
 
-## 模型
+## Cấu hình (`config.json`)
 
-上游前端不暴露真实模型 ID（由服务端 bot 配置决定）。本站实测为**单一 bot**（`bot_id=27623`，`provider=DeepSeek`），代理**无法切换 provider**。
+| Trường | Mặc định | Mô tả |
+|--------|----------|-------|
+| `listen_addr` | `127.0.0.1:47833` | Địa chỉ lắng nghe |
+| `upstream_base_url` | `https://deepseek.es` | Upstream |
+| `bot_id` | `27623` | ID bot AIPKit |
+| `sitekey` | `0x4AAAAAADlLZ3ljqZP6cQwq` | Sitekey Turnstile |
+| `cf_solver_url` | `http://127.0.0.1:8001` | Địa chỉ solver |
+| `api_keys` | `[]` | Key phía client; rỗng = chỉ cho phép máy cục bộ. Hỗ trợ `"sk-x"` hoặc `{"key":"sk-x","expires_at":<unix giây>}` (hết hạn tự động từ chối) |
+| `proxy` | `null` | Proxy đầu ra tới upstream (ví dụ `http://127.0.0.1:10808`) |
+| `initial_cookies` | `""` | Cookie cài sẵn (`"dsts_ok=1; dsts=<hash>"`): **bỏ qua hoàn toàn solver**, thu thập bằng `scripts/collect-cookie.mjs` |
+| `user_agent` | `Chrome/150` | UA trình duyệt (**phải trùng với cf_solver**, nếu không cookie sẽ không gắn được) |
+| `default_model` | `deepseek-es` | ID mô hình mặc định (có thể tùy chỉnh, `resolve_model` dùng làm giá trị dự phòng) |
+| `solver_timeout_secs` | `120` | Timeout giải Turnstile (giây) |
+| `http_timeout_secs` | `120` | Timeout đọc nhàn rỗi của yêu cầu upstream (giây; SSE không có timeout tổng, tính giữa hai lần đọc) |
+| `cookie_ttl_secs` | `1800` | TTL cache cookie bảo mật (còn 20% thì prefetch gia hạn nền) |
+| `connect_timeout_secs` | `20` | Timeout thiết lập kết nối upstream (luồng SSE không có timeout tổng, chỉ có kết nối + đọc nhàn rỗi) |
+| `cors_allow_origins` | `[]` | CORS; rỗng = tắt |
+| `solver_retries` | `2` | Số lần thử lại khi giải thất bại (exponential backoff) |
+| `breaker_fail_threshold` | `5` | Ngắt mạch xác thực: ngưỡng thất bại liên tiếp |
+| `breaker_cooldown_secs` | `30` | Ngắt mạch xác thực: số giây làm nguội |
+| `max_concurrency` | `0` | Số đồng thời tối đa **toàn cục** (0 = không giới hạn). Lưu ý: chỉ có hiệu lực trước khi handler trả header phản hồi, không giới hạn thời lượng luồng SSE đã thiết lập |
+| `rate_limit_per_sec` | `0` | Giới hạn tốc độ endpoint mỗi giây (0 = không giới hạn, cửa sổ cố định, dùng chung toàn cục; đặt trước bước xác thực nên yêu cầu chưa xác thực cũng được tính) |
+| `admin_enabled` | `false` | Bật bảng điều khiển |
+| `admin_token` | `""` | Token bảng điều khiển (bắt buộc khi bật); hỗ trợ dạng băm `sha256:<hex>` (lộ cấu hình ≠ lộ token) |
+| `admin_rate_limit_per_sec` | `10` | Giới hạn tốc độ riêng cho bảng điều khiển (chống dò token) |
+| `cache_ttl_secs` | `300` | TTL cache phản hồi (0 = tắt) |
+| `cache_max_entries` | `1000` | Số mục tối đa của cache phản hồi |
+| `cache_min_chars` | `0` | Kết quả ngắn hơn độ dài này sẽ không được cache |
+| `ledger_path` | `usage.db` | Đường dẫn sổ cái SQLite (rỗng = tắt) |
+| `ledger_retention_days` | `30` | Số ngày giữ sổ cái (0 = không dọn); bản ghi quá hạn tự động xóa mỗi 6 giờ |
+| `solver_urls` | `[]` | Địa chỉ nhiều solver (round-robin + chuyển dự phòng). Có thể trộn camoufox (tools/cf_solver) và adapter API bên thứ ba (tools/api_solver) |
+| `system_prompt_suffix` | `""` | Chỉ dẫn system được thêm vào (ngôn ngữ/phong cách) |
+| `pseudo_tools_enabled` | `false` | Bật công cụ giả (chèn mô tả công cụ; mô hình xuất khối ` ```tool ` → thực thi cục bộ) |
+| `max_response_bytes` | `2097152` | Giới hạn tổng hợp khi không streaming (chống phản hồi quá lớn) |
+| `max_request_bytes` | `8388608` | Giới hạn thân yêu cầu (mặc định 8MB; client ngữ cảnh dài có thể tăng) |
 
-因此本网关**只暴露一个真实模型**：
+Có thể ghi đè bằng biến môi trường: `LISTEN_ADDR` `UPSTREAM_BASE_URL` `BOT_ID` `SITEKEY` `CF_SOLVER_URL` `API_KEYS` `PROXY` `DEFAULT_MODEL` `CORS_ALLOW_ORIGINS` `HTTP_TIMEOUT_SECS` `CONNECT_TIMEOUT_SECS` `USER_AGENT`
 
-| 模型 id | 说明 |
-|---------|------|
-| `deepseek-es` | 唯一真实模型（`routable: true`） |
-
-> 历史别名（`deepseek-es-openai` / `-claude` / `-google` / `-openrouter` / `-xai`）仍被接受以兼容旧客户端，但**不再是独立模型**——会解析到 `deepseek-es`，且不再出现在 `/v1/models`。`/v1/models` 条目含 `routable` 与 `alias_of` 字段以如实标注。
+> **Bảo mật**: khi địa chỉ lắng nghe **không phải loopback** (như `0.0.0.0`) mà `api_keys` rỗng, gateway **từ chối khởi động** (fail-fast). Nếu thực sự cần mở ra Internet không xác thực, phải đặt rõ `ALLOW_INSECURE_PUBLIC=1` (nguy hiểm).
 
 ---
 
-## 开发与测试
+## Mô hình
+
+Frontend upstream không để lộ ID mô hình thật (do cấu hình bot phía server quyết định). Qua thực nghiệm, trang này chỉ có **một bot duy nhất** (`bot_id=27623`, `provider=DeepSeek`), proxy **không thể chuyển provider**.
+
+Do đó gateway này **chỉ cung cấp một mô hình thật**:
+
+| ID mô hình | Mô tả |
+|------------|-------|
+| `deepseek-es` | Mô hình thật duy nhất (`routable: true`) |
+
+> Các bí danh cũ (`deepseek-es-openai` / `-claude` / `-google` / `-openrouter` / `-xai`) vẫn được chấp nhận để tương thích client cũ, nhưng **không còn là mô hình độc lập**: chúng được phân giải về `deepseek-es` và không còn xuất hiện trong `/v1/models`. Mục trong `/v1/models` có các trường `routable` và `alias_of` để ghi nhận trung thực.
+
+---
+
+## Phát triển và kiểm thử
 
 ```bash
-# 单元测试 + 集成测试（mock 上游，211 项）
+# Unit test + integration test (mock upstream, 211 mục)
 cargo test
 
-# 格式与静态检查
+# Định dạng và kiểm tra tĩnh
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 
-# 真实 E2E（需 cf_solver 运行）
+# E2E thực tế (cần cf_solver đang chạy)
 node scripts/e2e-gateway.mjs "Di hola en una frase"
 
-# 压测
+# Kiểm thử tải
 node scripts/loadtest.mjs 4 12
 ```
 
-**实测结果**（真实上游）：
-| 指标 | 值 |
-|------|-----|
-| 单测 + 集成 | 211/211 通过 |
-| E2E OpenAI 流式 | ✅ 真实回复 |
-| E2E Anthropic 流式 | ✅ 事件序列完整 |
-| 压测 8 并发 × 24 请求 | 100% 成功，p50=1.86s，QPS 3.62 |
+**Kết quả đo thực tế** (upstream thật):
+| Chỉ số | Giá trị |
+|--------|---------|
+| Unit + integration | 211/211 đạt |
+| E2E OpenAI streaming | ✅ Phản hồi thật |
+| E2E Anthropic streaming | ✅ Chuỗi sự kiện đầy đủ |
+| Kiểm thử tải 8 đồng thời × 24 yêu cầu | 100% thành công, p50=1.86s, QPS 3.62 |
 
 ---
 
-## 深度分析文档
+## Tài liệu phân tích chuyên sâu
 
-`分析文档/` 内含完整逆向分析（00-09），包括上游协议、SSE 事件、配置结构、配额机制、E2E 验证报告。
+Thư mục `分析文档/` chứa phân tích reverse engineering đầy đủ (00-09), gồm giao thức upstream, sự kiện SSE, cấu trúc cấu hình, cơ chế hạn mức, báo cáo xác thực E2E.
 
 ---
 
-## 免责声明
+## Tuyên bố miễn trừ trách nhiệm
 
-本项目仅用于**学习与研究**。请遵守上游服务条款，不得用于滥用或绕过配额牟利。
+Dự án này chỉ dùng cho **học tập và nghiên cứu**. Vui lòng tuân thủ điều khoản dịch vụ của upstream, không được lạm dụng hoặc vượt hạn mức để trục lợi.

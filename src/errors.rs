@@ -6,31 +6,31 @@ use axum::Json;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
-    #[error("请求参数非法: {0}")]
+    #[error("Tham số yêu cầu không hợp lệ: {0}")]
     BadRequest(String),
 
-    #[error("未授权")]
+    #[error("Chưa được ủy quyền")]
     Unauthorized,
 
-    #[error("上游安全校验要求重新求解 Turnstile")]
+    #[error("Upstream yêu cầu giải lại Turnstile")]
     TsRequired,
 
-    #[error("Turnstile 求解失败: {0}")]
+    #[error("Giải Turnstile thất bại: {0}")]
     SolverFailed(String),
 
-    #[error("上游配额耗尽: {0}")]
+    #[error("Upstream đã hết hạn mức: {0}")]
     QuotaExhausted(String),
 
-    #[error("上游错误: {0}")]
+    #[error("Lỗi upstream: {0}")]
     Upstream(String),
 
-    #[error("上游流错误: {0}")]
+    #[error("Lỗi luồng upstream: {0}")]
     UpstreamStream(String),
 
-    #[error("网络错误: {0}")]
+    #[error("Lỗi mạng: {0}")]
     Network(String),
 
-    #[error("内部错误: {0}")]
+    #[error("Lỗi nội bộ: {0}")]
     Internal(String),
 }
 
@@ -189,7 +189,7 @@ mod tests {
             let t = e.anthropic_error_type();
             assert!(
                 VALID.contains(&t),
-                "非法 Anthropic 错误类型: {t} (from {e:?})"
+                "Loại lỗi Anthropic không hợp lệ: {t} (from {e:?})"
             );
         }
         // 非 Anthropic 原生的类型必须收敛到 api_error

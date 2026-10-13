@@ -78,16 +78,16 @@ impl UpstreamClient {
             .read_timeout(Duration::from_secs(cfg.http_timeout_secs));
         if let Some(p) = &cfg.proxy {
             let proxy = reqwest::Proxy::all(p)
-                .map_err(|e| AppError::Internal(format!("代理配置无效: {e}")))?;
+                .map_err(|e| AppError::Internal(format!("Cấu hình proxy không hợp lệ: {e}")))?;
             builder = builder.proxy(proxy.clone());
             sbuild = sbuild.proxy(proxy);
         }
         let http = builder
             .build()
-            .map_err(|e| AppError::Internal(format!("HTTP 客户端构建失败: {e}")))?;
+            .map_err(|e| AppError::Internal(format!("Tạo HTTP client thất bại: {e}")))?;
         let http_stream = sbuild
             .build()
-            .map_err(|e| AppError::Internal(format!("流式 HTTP 客户端构建失败: {e}")))?;
+            .map_err(|e| AppError::Internal(format!("Tạo HTTP client streaming thất bại: {e}")))?;
         let solver = Arc::new(SolverPool::new(&cfg)?);
         // 预置 cookie：让运维用真实浏览器过一次 Turnstile 后把 cookie 交给网关，
         // 从而在 cf_solver 不可用时**完全绕过求解器**（见 config.initial_cookies）。
@@ -246,10 +246,10 @@ impl UpstreamClient {
             .headers(self.base_headers(&AuthState::default()))
             .send()
             .await
-            .map_err(|e| AppError::Network(format!("抓取首页失败: {e}")))?;
+            .map_err(|e| AppError::Network(format!("Tải trang chủ thất bại: {e}")))?;
         r.text()
             .await
-            .map_err(|e| AppError::Network(format!("读取首页失败: {e}")))
+            .map_err(|e| AppError::Network(format!("Đọc trang chủ thất bại: {e}")))
     }
 
     /// 查询 dsgt 余额（`/wp-json/dsgt/v1/balance`）。
@@ -284,16 +284,19 @@ impl UpstreamClient {
             .headers(headers)
             .send()
             .await
-            .map_err(|e| AppError::Network(format!("查询余额失败: {e}")))?;
+            .map_err(|e| AppError::Network(format!("Truy vấn số dư thất bại: {e}")))?;
         let status = r.status();
         let body = r.text().await.unwrap_or_default();
         if !status.is_success() {
             return Err(AppError::Upstream(format!(
-                "余额查询 HTTP {status}: {body}"
+                "Truy vấn số dư HTTP {status}: {body}"
             )));
         }
-        serde_json::from_str(&body)
-            .map_err(|e| AppError::Upstream(format!("解析余额响应失败: {e}, body={body}")))
+        serde_json::from_str(&body).map_err(|e| {
+            AppError::Upstream(format!(
+                "Phân tích phản hồi số dư thất bại: {e}, body={body}"
+            ))
+        })
     }
 
     /// 通用 AIPKit admin-ajax 调用（带 nonce，自动吸收 set-cookie）。
@@ -326,7 +329,7 @@ impl UpstreamClient {
             .form(&form)
             .send()
             .await
-            .map_err(|e| AppError::Network(format!("{action} 请求失败: {e}")))?;
+            .map_err(|e| AppError::Network(format!("Yêu cầu {action} thất bại: {e}")))?;
         let status = r.status();
         let hdrs = r.headers().clone();
         let body = r.text().await.unwrap_or_default();
@@ -342,8 +345,11 @@ impl UpstreamClient {
                 "{action} HTTP {status}: {body}"
             )));
         }
-        serde_json::from_str(&body)
-            .map_err(|e| AppError::Upstream(format!("解析 {action} 响应失败: {e}, body={body}")))
+        serde_json::from_str(&body).map_err(|e| {
+            AppError::Upstream(format!(
+                "Phân tích phản hồi {action} thất bại: {e}, body={body}"
+            ))
+        })
     }
 
     /// 列出会话（`aipkit_get_conversations_list`）。
@@ -402,7 +408,7 @@ impl UpstreamClient {
         if v.get("success").and_then(|s| s.as_bool()).unwrap_or(false) {
             Ok(())
         } else {
-            Err(AppError::Upstream(format!("删除会话失败: {v}")))
+            Err(AppError::Upstream(format!("Xóa phiên thất bại: {v}")))
         }
     }
 
@@ -571,7 +577,7 @@ impl UpstreamClient {
     /// 求解 Turnstile（带指数退避重试）。每次重试前等待 2^i 秒（上限 8s）。
     async fn solve_with_retry(&self) -> AppResult<String> {
         let attempts = self.cfg.solver_retries + 1;
-        let mut last_err = AppError::SolverFailed("求解失败".into());
+        let mut last_err = AppError::SolverFailed("Giải thất bại".into());
         for i in 0..attempts {
             if i > 0 {
                 // 指数退避 2^i 秒，上限 8s。
@@ -599,7 +605,7 @@ impl UpstreamClient {
     async fn do_auth(&self) -> AppResult<()> {
         if !self.breaker_allow().await {
             return Err(AppError::SolverFailed(
-                "认证熔断中（近期连续失败），请稍后重试".into(),
+                "Xác thực đang ngắt mạch (thất bại liên tiếp gần đây), vui lòng thử lại sau".into(),
             ));
         }
         // M9：确保半开探测标记在本次认证结束时释放（无论成败）
@@ -632,7 +638,7 @@ impl UpstreamClient {
             .form(&form)
             .send()
             .await
-            .map_err(|e| AppError::Network(format!("兑换安全 cookie 失败: {e}")))?;
+            .map_err(|e| AppError::Network(format!("Đổi cookie bảo mật thất bại: {e}")))?;
         let status = r.status();
         let hdrs = r.headers().clone();
         let body = r.text().await.unwrap_or_default();
@@ -651,7 +657,7 @@ impl UpstreamClient {
         if !vr.ok {
             self.breaker_on_failure().await;
             return Err(AppError::SolverFailed(format!(
-                "安全校验兑换失败(HTTP {status}): {body}"
+                "Đổi xác thực bảo mật thất bại (HTTP {status}): {body}"
             )));
         }
         // 记录认证时刻（供 TTL 判定）
@@ -696,7 +702,7 @@ impl UpstreamClient {
             .form(&form)
             .send()
             .await
-            .map_err(|e| AppError::Network(format!("获取 nonce 失败: {e}")))?;
+            .map_err(|e| AppError::Network(format!("Lấy nonce thất bại: {e}")))?;
         let hdrs = r.headers().clone();
         let body = r.text().await.unwrap_or_default();
         {
@@ -713,14 +719,17 @@ impl UpstreamClient {
         struct NonceData {
             nonce: String,
         }
-        let pr: Resp = serde_json::from_str(&body)
-            .map_err(|e| AppError::Upstream(format!("解析 nonce 响应失败: {e}, body={body}")))?;
+        let pr: Resp = serde_json::from_str(&body).map_err(|e| {
+            AppError::Upstream(format!(
+                "Phân tích phản hồi nonce thất bại: {e}, body={body}"
+            ))
+        })?;
         if !pr.success {
-            return Err(AppError::Upstream(format!("nonce 获取失败: {body}")));
+            return Err(AppError::Upstream(format!("Lấy nonce thất bại: {body}")));
         }
         let nonce = pr.data.map(|d| d.nonce).unwrap_or_default();
         if nonce.is_empty() {
-            return Err(AppError::Upstream("nonce 为空".into()));
+            return Err(AppError::Upstream("nonce rỗng".into()));
         }
         let mut st = self.state.lock().await;
         st.nonce = Some(nonce.clone());
@@ -765,7 +774,7 @@ impl UpstreamClient {
             .form(&form)
             .send()
             .await
-            .map_err(|e| AppError::Network(format!("缓存消息失败: {e}")))?;
+            .map_err(|e| AppError::Network(format!("Cache tin nhắn thất bại: {e}")))?;
         let status = r.status();
         let hdrs = r.headers().clone();
         let body = r.text().await.unwrap_or_default();
@@ -786,14 +795,17 @@ impl UpstreamClient {
         struct CacheData {
             cache_key: String,
         }
-        let pr: Resp = serde_json::from_str(&body)
-            .map_err(|e| AppError::Upstream(format!("解析 cache 响应失败: {e}, body={body}")))?;
+        let pr: Resp = serde_json::from_str(&body).map_err(|e| {
+            AppError::Upstream(format!(
+                "Phân tích phản hồi cache thất bại: {e}, body={body}"
+            ))
+        })?;
         if !pr.success {
-            return Err(AppError::Upstream(format!("缓存失败: {body}")));
+            return Err(AppError::Upstream(format!("Cache thất bại: {body}")));
         }
         let key = pr.data.map(|d| d.cache_key).unwrap_or_default();
         if key.is_empty() {
-            return Err(AppError::Upstream("cache_key 为空".into()));
+            return Err(AppError::Upstream("cache_key rỗng".into()));
         }
         Ok(key)
     }
@@ -837,7 +849,7 @@ impl UpstreamClient {
             .headers(headers)
             .send()
             .await
-            .map_err(|e| AppError::Network(format!("建立 SSE 失败: {e}")))?;
+            .map_err(|e| AppError::Network(format!("Thiết lập SSE thất bại: {e}")))?;
         // M5：403 视为安全校验失效（可触发上层重认证重试），而非普通上游错误
         if r.status() == reqwest::StatusCode::FORBIDDEN {
             return Err(AppError::TsRequired);
@@ -866,11 +878,11 @@ pub struct DsgtConfig {
 pub fn parse_dsgt_config(html: &str) -> AppResult<DsgtConfig> {
     let key = html
         .find("dsgtConfig")
-        .ok_or_else(|| AppError::Upstream("页面未找到 dsgtConfig".into()))?;
+        .ok_or_else(|| AppError::Upstream("Không tìm thấy dsgtConfig trong trang".into()))?;
     let rest = &html[key..];
     let brace = rest
         .find('{')
-        .ok_or_else(|| AppError::Upstream("dsgtConfig 无 JSON 对象".into()))?;
+        .ok_or_else(|| AppError::Upstream("dsgtConfig không có đối tượng JSON".into()))?;
     let body = &rest[brace..];
     // 大括号配平（考虑字符串与转义）
     let mut depth = 0i32;
@@ -901,9 +913,9 @@ pub fn parse_dsgt_config(html: &str) -> AppResult<DsgtConfig> {
             _ => {}
         }
     }
-    let end = end.ok_or_else(|| AppError::Upstream("dsgtConfig JSON 未闭合".into()))?;
+    let end = end.ok_or_else(|| AppError::Upstream("JSON dsgtConfig chưa được đóng".into()))?;
     let cfg: DsgtConfig = serde_json::from_str(&body[..end])
-        .map_err(|e| AppError::Upstream(format!("解析 dsgtConfig 失败: {e}")))?;
+        .map_err(|e| AppError::Upstream(format!("Phân tích dsgtConfig thất bại: {e}")))?;
     Ok(cfg)
 }
 
@@ -1027,7 +1039,7 @@ where
                                 MAX_SSE_BUF_BYTES
                             );
                             st.done = true;
-                            st.pending_err = Some("上游流异常：单事件超过大小上限".to_string());
+                            st.pending_err = Some("Luồng upstream bất thường: một sự kiện vượt quá giới hạn kích thước".to_string());
                             st.buf.clear();
                         }
                     }

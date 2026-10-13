@@ -62,10 +62,12 @@ impl Ledger {
 
     fn try_open(path: &str) -> AppResult<Self> {
         let conn = Connection::open(path)
-            .map_err(|e| AppError::Internal(format!("打开用量账本失败: {e}")))?;
+            .map_err(|e| AppError::Internal(format!("Mở sổ cái sử dụng thất bại: {e}")))?;
         // 多实例/并发打开同一账本时避免 "database is locked"：设置忙等待超时（5s）。
         conn.busy_timeout(std::time::Duration::from_secs(5))
-            .map_err(|e| AppError::Internal(format!("设置账本忙等待失败: {e}")))?;
+            .map_err(|e| {
+                AppError::Internal(format!("Đặt busy timeout cho sổ cái thất bại: {e}"))
+            })?;
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
              -- 自动 checkpoint：WAL 超约 4MB 时折叠回主库，避免 -wal 无限增长
@@ -84,7 +86,7 @@ impl Ledger {
              );
              CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage(ts);",
         )
-        .map_err(|e| AppError::Internal(format!("初始化账本失败: {e}")))?;
+        .map_err(|e| AppError::Internal(format!("Khởi tạo sổ cái thất bại: {e}")))?;
         Ok(Ledger {
             conn: Some(Arc::new(Mutex::new(conn))),
         })
@@ -105,10 +107,10 @@ impl Ledger {
         tokio::task::spawn_blocking(move || {
             let c = conn
                 .lock()
-                .map_err(|e| AppError::Internal(format!("账本锁中毒: {e}")))?;
+                .map_err(|e| AppError::Internal(format!("Khóa sổ cái bị poisoned: {e}")))?;
             let n = c
                 .execute("DELETE FROM usage WHERE ts < ?1", rusqlite::params![cutoff])
-                .map_err(|e| AppError::Internal(format!("账本清理失败: {e}")))?;
+                .map_err(|e| AppError::Internal(format!("Dọn dẹp sổ cái thất bại: {e}")))?;
             // 用 PASSIVE checkpoint（不阻塞其他读者），并在失败时**显式记录**
             // ——此前是 `let _ =` 静默吞错，且 TRUNCATE 会长时间阻塞 record/stats。
             if let Err(e) = c.execute_batch("PRAGMA wal_checkpoint(PASSIVE);") {
@@ -117,7 +119,7 @@ impl Ledger {
             Ok(n)
         })
         .await
-        .map_err(|e| AppError::Internal(format!("账本清理任务失败: {e}")))?
+        .map_err(|e| AppError::Internal(format!("Tác vụ dọn dẹp sổ cái thất bại: {e}")))?
     }
 
     /// 是否启用持久化。
@@ -134,7 +136,7 @@ impl Ledger {
             let c = match conn.lock() {
                 Ok(c) => c,
                 Err(e) => {
-                    tracing::warn!("账本锁中毒: {e}");
+                    tracing::warn!("Khóa sổ cái bị poisoned: {e}");
                     return;
                 }
             };
@@ -167,7 +169,7 @@ impl Ledger {
         tokio::task::spawn_blocking(move || {
             let c = conn
                 .lock()
-                .map_err(|e| AppError::Internal(format!("账本锁中毒: {e}")))?;
+                .map_err(|e| AppError::Internal(format!("Khóa sổ cái bị poisoned: {e}")))?;
             let (where_clause, param): (&str, Vec<i64>) = match since_ts {
                 Some(t) => ("WHERE ts >= ?1", vec![t]),
                 None => ("", vec![]),
@@ -181,16 +183,16 @@ impl Ledger {
                         COALESCE(CAST(AVG(latency_ms) AS INTEGER),0)
                  FROM usage {where_clause}"
             );
-            let mut stmt = c
-                .prepare(&sql)
-                .map_err(|e| AppError::Internal(format!("账本查询准备失败: {e}")))?;
+            let mut stmt = c.prepare(&sql).map_err(|e| {
+                AppError::Internal(format!("Chuẩn bị truy vấn sổ cái thất bại: {e}"))
+            })?;
             let mut rows = stmt
                 .query(rusqlite::params_from_iter(param.iter()))
-                .map_err(|e| AppError::Internal(format!("账本查询失败: {e}")))?;
+                .map_err(|e| AppError::Internal(format!("Truy vấn sổ cái thất bại: {e}")))?;
             let row = rows
                 .next()
-                .map_err(|e| AppError::Internal(format!("账本读取失败: {e}")))?
-                .ok_or_else(|| AppError::Internal("账本无结果".into()))?;
+                .map_err(|e| AppError::Internal(format!("Đọc sổ cái thất bại: {e}")))?
+                .ok_or_else(|| AppError::Internal("Sổ cái không có kết quả".into()))?;
             Ok(UsageStats {
                 total_requests: row.get::<_, i64>(0).unwrap_or(0) as u64,
                 total_prompt_tokens: row.get::<_, i64>(1).unwrap_or(0) as u64,
@@ -201,7 +203,7 @@ impl Ledger {
             })
         })
         .await
-        .map_err(|e| AppError::Internal(format!("账本任务失败: {e}")))?
+        .map_err(|e| AppError::Internal(format!("Tác vụ sổ cái thất bại: {e}")))?
     }
 
     /// 最近 N 条记录（供控制台）。
@@ -212,13 +214,13 @@ impl Ledger {
         tokio::task::spawn_blocking(move || {
             let c = conn
                 .lock()
-                .map_err(|e| AppError::Internal(format!("账本锁中毒: {e}")))?;
+                .map_err(|e| AppError::Internal(format!("Khóa sổ cái bị poisoned: {e}")))?;
             let mut stmt = c
                 .prepare(
                     "SELECT ts,model,key_id,prompt_tokens,completion_tokens,latency_ms,status,stream,cached
                      FROM usage ORDER BY id DESC LIMIT ?1",
                 )
-                .map_err(|e| AppError::Internal(format!("账本查询准备失败: {e}")))?;
+                .map_err(|e| AppError::Internal(format!("Chuẩn bị truy vấn sổ cái thất bại: {e}")))?;
             let rows = stmt
                 .query_map(rusqlite::params![limit as i64], |r| {
                     Ok(serde_json::json!({
@@ -233,12 +235,12 @@ impl Ledger {
                         "cached": r.get::<_, i64>(8)? != 0,
                     }))
                 })
-                .map_err(|e| AppError::Internal(format!("账本查询失败: {e}")))?;
+                .map_err(|e| AppError::Internal(format!("Truy vấn sổ cái thất bại: {e}")))?;
             let out: Vec<_> = rows.filter_map(|r| r.ok()).collect();
             Ok(out)
         })
         .await
-        .map_err(|e| AppError::Internal(format!("账本任务失败: {e}")))?
+        .map_err(|e| AppError::Internal(format!("Tác vụ sổ cái thất bại: {e}")))?
     }
 }
 

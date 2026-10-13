@@ -721,7 +721,7 @@ async fn circuit_breaker_opens_after_failures() {
         .await
         .unwrap();
     assert!(
-        body(&b1).contains("求解") || body(&b1).contains("失败"),
+        body(&b1).contains("giải") || body(&b1).contains("thất bại"),
         "b1={b1}"
     );
     // 第二次：熔断 → 快速失败且提示熔断
@@ -736,7 +736,7 @@ async fn circuit_breaker_opens_after_failures() {
         .text()
         .await
         .unwrap();
-    assert!(body(&b2).contains("熔断"), "第二次应被熔断: {b2}");
+    assert!(body(&b2).contains("ngắt mạch"), "第二次应被熔断: {b2}");
 }
 
 // ── P1-5：限流 ───────────────────────────────────────────
@@ -920,7 +920,7 @@ async fn admin_console_auth() {
         .await
         .unwrap();
     assert_eq!(r.status(), 200);
-    assert!(r.text().await.unwrap().contains("控制台"));
+    assert!(r.text().await.unwrap().contains("Bảng điều khiển"));
     let r = reqwest::get(format!("{abase}/admin/api/status?token=s3cret"))
         .await
         .unwrap();

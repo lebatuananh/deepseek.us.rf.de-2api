@@ -149,7 +149,9 @@ pub fn execute_tool(call: &ToolCall) -> serde_json::Value {
                 .unwrap_or("");
             serde_json::json!({ "ok": true, "result": text })
         }
-        other => serde_json::json!({ "ok": false, "error": format!("未知工具: {other}") }),
+        other => {
+            serde_json::json!({ "ok": false, "error": format!("Công cụ không xác định: {other}") })
+        }
     }
 }
 

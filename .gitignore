@@ -19,3 +19,6 @@ RELEASE_NOTES.md
 
 # 用量账本
 usage.db*
+
+# Dữ liệu mount từ Docker
+/data/

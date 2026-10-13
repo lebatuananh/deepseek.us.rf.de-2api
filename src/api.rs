@@ -152,7 +152,7 @@ async fn rate_limit_mw(State(rl): State<RateLimiter>, req: Request, next: Next) 
             StatusCode::TOO_MANY_REQUESTS,
             Json(serde_json::json!({
                 "error": {
-                    "message": "本机限流：请求过于频繁，请稍后重试",
+                    "message": "Giới hạn tốc độ cục bộ: quá nhiều yêu cầu, vui lòng thử lại sau",
                     "type": "rate_limit_error",
                     "code": "rate_limit_error",
                 }
@@ -173,7 +173,7 @@ async fn admin_rate_limit_mw(State(rl): State<RateLimiter>, req: Request, next: 
             [(axum::http::header::RETRY_AFTER, "1")],
             Json(serde_json::json!({
                 "error": {
-                    "message": "控制台限流：请求过于频繁",
+                    "message": "Giới hạn tốc độ bảng điều khiển: quá nhiều yêu cầu",
                     "type": "rate_limit_error",
                     "code": "rate_limit_exceeded",
                 }
@@ -240,7 +240,8 @@ async fn openai_chat(
     let req: oai::ChatRequest = match serde_json::from_slice(&body) {
         Ok(r) => r,
         Err(e) => {
-            return AppError::BadRequest(format!("请求体解析失败: {e}")).into_response();
+            return AppError::BadRequest(format!("Phân tích nội dung yêu cầu thất bại: {e}"))
+                .into_response();
         }
     };
     openai_chat_inner(state, headers, req)
@@ -442,7 +443,7 @@ async fn openai_chat_inner(
                     }
                     // M3：中途要求安全校验——发结构化错误（不泄漏哨兵字符串）
                     oai::Translated::TsRequired => {
-                        let data = serde_json::json!({"error":{"message":"上游要求重新安全校验，请重试","type":"api_error"}}).to_string();
+                        let data = serde_json::json!({"error":{"message":"Upstream yêu cầu xác thực bảo mật lại, vui lòng thử lại","type":"api_error"}}).to_string();
                         push_data(data);
                     }
                 }
@@ -546,7 +547,9 @@ async fn openai_chat_inner(
             Ok(oai::Translated::Delta(t)) => {
                 // P2：非流式输出上限保护
                 if full.len() + t.len() > state.cfg.max_response_bytes {
-                    return Err(AppError::Upstream("响应体超过上限".into()));
+                    return Err(AppError::Upstream(
+                        "Nội dung phản hồi vượt quá giới hạn".into(),
+                    ));
                 }
                 full.push_str(&t);
             }
@@ -735,7 +738,7 @@ async fn delete_conversation(
         return e.into_response();
     }
     let Some(id) = q.get("id").filter(|s| !s.is_empty()) else {
-        return AppError::BadRequest("缺少 id 查询参数".into()).into_response();
+        return AppError::BadRequest("Thiếu tham số truy vấn id".into()).into_response();
     };
     let sid = session_id_of(&headers);
     match state.upstream.delete_conversation(&sid, id).await {
@@ -783,7 +786,7 @@ async fn replay_response(
             StatusCode::CONFLICT,
             Json(serde_json::json!({
                 "error": {
-                    "message": "响应不存在或重放缓冲已过期，请重新发起请求",
+                    "message": "Phản hồi không tồn tại hoặc bộ đệm phát lại đã hết hạn, vui lòng gửi lại yêu cầu",
                     "type": "invalid_request_error",
                     "code": "replay_unavailable",
                 }
@@ -884,7 +887,8 @@ async fn anthropic_messages(
     let req: anth::MessagesRequest = match serde_json::from_slice(&body) {
         Ok(r) => r,
         Err(e) => {
-            return AppError::BadRequest(format!("请求体解析失败: {e}")).into_anthropic_response()
+            return AppError::BadRequest(format!("Phân tích nội dung yêu cầu thất bại: {e}"))
+                .into_anthropic_response()
         }
     };
     anthropic_messages_inner(state, headers, req)
@@ -1157,7 +1161,7 @@ async fn anthropic_messages_inner(
                 Ok(oai::Translated::TsRequired) => {
                     let body = serde_json::json!({
                         "type": "error",
-                        "error": {"type": "api_error", "message": "上游要求重新安全校验，请重试"}
+                        "error": {"type": "api_error", "message": "Upstream yêu cầu xác thực bảo mật lại, vui lòng thử lại"}
                     });
                     evs.push(Ok(Event::default().event("error").data(body.to_string())));
                 }
@@ -1261,7 +1265,9 @@ async fn anthropic_messages_inner(
             Ok(oai::Translated::Delta(t)) => {
                 // M11：与 OpenAI 非流式对齐的响应上限保护
                 if full.len() + t.len() > state.cfg.max_response_bytes {
-                    return Err(AppError::Upstream("响应体超过上限".into()));
+                    return Err(AppError::Upstream(
+                        "Nội dung phản hồi vượt quá giới hạn".into(),
+                    ));
                 }
                 full.push_str(&t);
             }
@@ -1353,7 +1359,8 @@ async fn count_tokens(
     let req: anth::MessagesRequest = match serde_json::from_slice(&body) {
         Ok(r) => r,
         Err(e) => {
-            return AppError::BadRequest(format!("请求体解析失败: {e}")).into_anthropic_response()
+            return AppError::BadRequest(format!("Phân tích nội dung yêu cầu thất bại: {e}"))
+                .into_anthropic_response()
         }
     };
     count_tokens_inner(state, headers, req)

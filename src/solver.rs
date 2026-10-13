@@ -67,9 +67,9 @@ impl SolverPool {
                 builder = builder.proxy(px);
             }
         }
-        let http = builder
-            .build()
-            .map_err(|e| AppError::SolverFailed(format!("构建求解器 HTTP 客户端失败: {e}")))?;
+        let http = builder.build().map_err(|e| {
+            AppError::SolverFailed(format!("Tạo HTTP client cho solver thất bại: {e}"))
+        })?;
 
         // 实例列表：solver_urls 优先；为空则回退单实例 cf_solver_url
         let mut urls: Vec<String> = cfg
@@ -85,7 +85,9 @@ impl SolverPool {
             }
         }
         if urls.is_empty() {
-            return Err(AppError::SolverFailed("未配置任何 cf_solver 地址".into()));
+            return Err(AppError::SolverFailed(
+                "Chưa cấu hình địa chỉ cf_solver nào".into(),
+            ));
         }
         let n = urls.len();
         Ok(SolverPool {
@@ -163,7 +165,7 @@ impl SolverPool {
     /// 每个实例尝试一轮；全部失败则返回最后一个错误。
     pub async fn solve(&self) -> AppResult<String> {
         let n = self.urls.len();
-        let mut last_err = AppError::SolverFailed("无可用求解器".into());
+        let mut last_err = AppError::SolverFailed("Không có solver khả dụng".into());
         let mut tried: Vec<usize> = Vec::with_capacity(n);
         for _ in 0..n {
             let idx = self.pick();
@@ -197,27 +199,32 @@ impl SolverPool {
             .get(&url)
             .send()
             .await
-            .map_err(|e| AppError::SolverFailed(format!("提交求解任务失败: {e}")))?;
+            .map_err(|e| AppError::SolverFailed(format!("Gửi tác vụ giải thất bại: {e}")))?;
         if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
             self.record_failure(idx);
-            return Err(AppError::SolverFailed("求解器限流(429)".into()));
+            return Err(AppError::SolverFailed(
+                "Solver giới hạn tốc độ (429)".into(),
+            ));
         }
         if !resp.status().is_success() {
             let code = resp.status();
             let body = resp.text().await.unwrap_or_default();
             self.record_failure(idx);
-            return Err(AppError::SolverFailed(format!("求解器返回 {code}: {body}")));
+            return Err(AppError::SolverFailed(format!(
+                "Solver trả về {code}: {body}"
+            )));
         }
-        let accepted: SolveAccepted = resp
-            .json()
-            .await
-            .map_err(|e| AppError::SolverFailed(format!("解析求解任务响应失败: {e}")))?;
+        let accepted: SolveAccepted = resp.json().await.map_err(|e| {
+            AppError::SolverFailed(format!("Phân tích phản hồi tác vụ giải thất bại: {e}"))
+        })?;
 
         let deadline = tokio::time::Instant::now() + self.timeout;
         loop {
             if tokio::time::Instant::now() >= deadline {
                 self.record_failure(idx);
-                return Err(AppError::SolverFailed("Turnstile 求解超时".into()));
+                return Err(AppError::SolverFailed(
+                    "Giải Turnstile quá thời gian".into(),
+                ));
             }
             tokio::time::sleep(Duration::from_secs(2)).await;
 
@@ -233,11 +240,15 @@ impl SolverPool {
             let status = r.status();
             if status == reqwest::StatusCode::NOT_FOUND {
                 self.record_failure(idx);
-                return Err(AppError::SolverFailed("求解任务过期/未知".into()));
+                return Err(AppError::SolverFailed(
+                    "Tác vụ giải đã hết hạn/không xác định".into(),
+                ));
             }
             if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
                 self.record_failure(idx);
-                return Err(AppError::SolverFailed("求解器限流(429)".into()));
+                return Err(AppError::SolverFailed(
+                    "Solver giới hạn tốc độ (429)".into(),
+                ));
             }
             let sr: SolveResult = match r.json().await {
                 Ok(v) => v,
@@ -251,7 +262,9 @@ impl SolverPool {
                     let token = sr.value.unwrap_or_default();
                     if token.is_empty() {
                         self.record_failure(idx);
-                        return Err(AppError::SolverFailed("求解成功但 token 为空".into()));
+                        return Err(AppError::SolverFailed(
+                            "Giải thành công nhưng token rỗng".into(),
+                        ));
                     }
                     self.record_success(idx, started.elapsed().as_secs_f64());
                     return Ok(token);
@@ -260,12 +273,14 @@ impl SolverPool {
                 "error" => {
                     self.record_failure(idx);
                     return Err(AppError::SolverFailed(
-                        sr.message.unwrap_or_else(|| "求解失败".into()),
+                        sr.message.unwrap_or_else(|| "Giải thất bại".into()),
                     ));
                 }
                 other => {
                     self.record_failure(idx);
-                    return Err(AppError::SolverFailed(format!("未知求解状态: {other}")));
+                    return Err(AppError::SolverFailed(format!(
+                        "Trạng thái giải không xác định: {other}"
+                    )));
                 }
             }
         }

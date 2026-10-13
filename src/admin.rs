@@ -20,7 +20,7 @@ fn check_admin(
         return Err(Box::new(
             (
                 StatusCode::NOT_FOUND,
-                "控制台未启用（设置 admin_enabled=true）",
+                "Bảng điều khiển chưa được bật (đặt admin_enabled=true)",
             )
                 .into_response(),
         ));
@@ -29,7 +29,7 @@ fn check_admin(
         return Err(Box::new(
             (
                 StatusCode::FORBIDDEN,
-                "控制台已启用但未设置 admin_token，拒绝访问",
+                "Bảng điều khiển đã bật nhưng chưa đặt admin_token, từ chối truy cập",
             )
                 .into_response(),
         ));
@@ -42,7 +42,11 @@ fn check_admin(
     match provided {
         Some(t) if verify_admin_token(&state.cfg.admin_token, &t) => Ok(()),
         _ => Err(Box::new(
-            (StatusCode::UNAUTHORIZED, "控制台令牌无效").into_response(),
+            (
+                StatusCode::UNAUTHORIZED,
+                "Token bảng điều khiển không hợp lệ",
+            )
+                .into_response(),
         )),
     }
 }
@@ -165,9 +169,9 @@ pub async fn admin_status(
 
 /// 控制台 HTML（自包含、无外部资源）。
 const ADMIN_HTML: &str = r#"<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="utf-8"/>
+<html lang="vi"><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>deepseek-es-2api 控制台</title>
+<title>deepseek-es-2api - Bảng điều khiển</title>
 <style>
 :root{--bg:#0d1117;--panel:#161b22;--line:#30363d;--fg:#e6edf3;--muted:#8b949e;
 --accent:#3fb950;--accent2:#58a6ff;--warn:#d29922;--err:#f85149;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
@@ -195,15 +199,15 @@ footer{padding:16px 24px;color:var(--muted);font-size:12px;border-top:1px solid 
 button{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 12px;cursor:pointer;font-size:13px}
 button:hover{border-color:var(--accent2);color:var(--accent2)}
 </style></head><body>
-<header><h1>deepseek-es-2api 控制台</h1><span class="ver" id="ver"></span>
-<span style="flex:1"></span><button onclick="load()">刷新</button></header>
+<header><h1>deepseek-es-2api - Bảng điều khiển</h1><span class="ver" id="ver"></span>
+<span style="flex:1"></span><button onclick="load()">Làm mới</button></header>
 <main>
 <div class="row" id="metrics"></div>
-<div class="card"><h2>模型</h2><div id="models"></div></div>
-<div class="card"><h2>Solver 健康</h2><div id="solver"></div></div>
-<div class="card"><h2>最近请求</h2><div id="recent"></div></div>
+<div class="card"><h2>Mô hình</h2><div id="models"></div></div>
+<div class="card"><h2>Tình trạng Solver</h2><div id="solver"></div></div>
+<div class="card"><h2>Yêu cầu gần đây</h2><div id="recent"></div></div>
 </main>
-<footer>令牌通过 <code>?token=</code> 或 <code>X-Admin-Token</code> 传递。数据实时读取，不缓存。</footer>
+<footer>Token được truyền qua <code>?token=</code> hoặc <code>X-Admin-Token</code>. Dữ liệu được đọc theo thời gian thực, không lưu cache.</footer>
 <script>
 const qs=new URLSearchParams(location.search);const token=qs.get('token')||'';
 async function api(p){const r=await fetch(p+(token?('?token='+encodeURIComponent(token)):''),
@@ -212,7 +216,7 @@ function el(t,c){const e=document.createElement(t);if(c)e.className=c;return e;}
 function metric(title,value,sub){const d=el('div','card');d.innerHTML=`<h2>${title}</h2><div class="metric">${value}</div>`+
 (sub?`<div style="color:var(--muted);font-size:12px;margin-top:4px">${sub}</div>`:'');return d;}
 function table(cols,rows){
-  if(!rows.length)return '<div class="empty">暂无数据</div>';
+  if(!rows.length)return '<div class="empty">Chưa có dữ liệu</div>';
   let h='<table><thead><tr>'+cols.map(c=>`<th>${c}</th>`).join('')+'</tr></thead><tbody>';
   h+=rows.join('');return h+'</tbody></table>';
 }
@@ -221,31 +225,31 @@ async function load(){
     const d=await api('/admin/api/status');
     document.getElementById('ver').textContent='v'+d.version;
     const s=d.stats||{};const m=document.getElementById('metrics');m.innerHTML='';
-    m.append(metric('总请求',(s.total_requests??0).toLocaleString()));
+    m.append(metric('Tổng yêu cầu',(s.total_requests??0).toLocaleString()));
     m.append(metric('Prompt tokens',(s.total_prompt_tokens??0).toLocaleString()));
     m.append(metric('Completion tokens',(s.total_completion_tokens??0).toLocaleString()));
-    m.append(metric('缓存命中',(s.cache_hits??0).toLocaleString()));
-    m.append(metric('错误',(s.errors??0).toLocaleString()));
-    m.append(metric('平均延迟',(s.avg_latency_ms??0)+' <small>ms</small>'));
-    m.append(metric('活跃会话',(d.sessions??0).toLocaleString()));
-    m.append(metric('下游 Key',(d.config?.api_keys??0).toString(),'鉴权白名单数量'));
-    document.getElementById('models').innerHTML=table(['ID','Label','Provider','上下文','状态'],
+    m.append(metric('Cache trúng',(s.cache_hits??0).toLocaleString()));
+    m.append(metric('Lỗi',(s.errors??0).toLocaleString()));
+    m.append(metric('Độ trễ trung bình',(s.avg_latency_ms??0)+' <small>ms</small>'));
+    m.append(metric('Phiên hoạt động',(d.sessions??0).toLocaleString()));
+    m.append(metric('Key phía client',(d.config?.api_keys??0).toString(),'Số key trong danh sách cho phép'));
+    document.getElementById('models').innerHTML=table(['ID','Nhãn','Nhà cung cấp','Ngữ cảnh','Trạng thái'],
       (d.models||[]).map(x=>`<tr><td class="mono">${x.id}</td><td>${x.label}</td><td>${x.provider}</td>`+
         `<td class="mono">${x.context_window.toLocaleString()}</td>`+
-        `<td>${x.default?'<span class="badge on">默认</span>':''} ${x.routable?'':'<span class="badge">别名</span>'}</td></tr>`));
-    document.getElementById('solver').innerHTML=table(['地址','状态','连续失败','最近成功','成功/失败'],
+        `<td>${x.default?'<span class="badge on">Mặc định</span>':''} ${x.routable?'':'<span class="badge">Bí danh</span>'}</td></tr>`));
+    document.getElementById('solver').innerHTML=table(['Địa chỉ','Trạng thái','Lỗi liên tiếp','Thành công gần nhất','Thành công/Thất bại'],
       (d.solver||[]).map(x=>`<tr><td class="mono">${x.url}</td>`+
-        `<td><span class="dot ${x.healthy?'ok':'bad'}"></span>${x.healthy?'健康':'异常'}</td>`+
+        `<td><span class="dot ${x.healthy?'ok':'bad'}"></span>${x.healthy?'Khỏe mạnh':'Bất thường'}</td>`+
         `<td>${x.consecutive_failures}</td><td>${x.last_success_secs!=null?x.last_success_secs.toFixed(1)+'s':'—'}</td>`+
         `<td class="mono">${x.total_success}/${x.total_failure}</td></tr>`));
-    document.getElementById('recent').innerHTML=table(['时间','模型','Key','Tok(in/out)','延迟','状态'],
+    document.getElementById('recent').innerHTML=table(['Thời gian','Mô hình','Key','Tok(vào/ra)','Độ trễ','Trạng thái'],
       (d.recent||[]).map(x=>{const t=new Date(x.ts*1000).toLocaleTimeString();
         return `<tr><td class="mono">${t}</td><td class="mono">${x.model}</td><td class="mono">${x.key_id}</td>`+
         `<td class="mono">${x.prompt_tokens}/${x.completion_tokens}</td>`+
         `<td class="mono">${x.latency_ms}ms</td>`+
-        `<td><span class="dot ${x.status<400?'ok':'bad'}"></span>${x.status}${x.cached?' <span class="badge">缓存</span>':''}</td></tr>`;}));
+        `<td><span class="dot ${x.status<400?'ok':'bad'}"></span>${x.status}${x.cached?' <span class="badge">Cache</span>':''}</td></tr>`;}));
   }catch(e){
-    document.getElementById('metrics').innerHTML=`<div class="card" style="color:var(--err)">加载失败: ${e.message}（检查 ?token= 是否正确）</div>`;
+    document.getElementById('metrics').innerHTML=`<div class="card" style="color:var(--err)">Tải thất bại: ${e.message} (kiểm tra ?token= có đúng không)</div>`;
   }
 }
 load();setInterval(load,5000);
